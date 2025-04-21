@@ -10,6 +10,8 @@ class App:
         self.playing = False
         self.play_music_on_startup()  # 起動時に再生！
 
+        pyxel.run(self.update, self.draw)
+        
     def play_music_on_startup(self):
         for ch, sfx in enumerate(self.music):
             pyxel.sound(ch).set(*sfx)
