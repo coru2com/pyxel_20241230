@@ -4,7 +4,7 @@ import json
 
 # Color settings
 COLOR_CODES = [8, 9, 11, 10, 13, 14]  # RED, BLUE, GREEN, YELLOW, PURPLE, ORANGE
-COLOR_NAMES = ['RED', 'BLUE', 'GREEN', 'YELLOW', 'PURPLE', 'ORANGE']
+COLOR_NAMES = ['RED', 'ORANGE', 'GREEN', 'YELLOW', 'GRAY', 'PINK']
 COLOR_MAP = dict(zip(COLOR_CODES, COLOR_NAMES))
 
 BUTTON_SIZE = 16
@@ -146,7 +146,7 @@ class App:
         pyxel.text(66, 53, "Reset", 7)
 
         # History (2 columns × 5 rows)
-        pyxel.text(10, 70, "History:", 0)
+        pyxel.text(10, 60, "History:", 0)
         for i, (guess, hit, blow) in enumerate(self.history[-10:]):
             col = i % 2
             row = i // 2
@@ -168,7 +168,7 @@ class App:
             pyxel.circ(105 + i * 12, 40, 4, color)
 
         pyxel.rect(40, 60, 80, 12, 9)
-        pyxel.text(60, 63, "RETRY", 7)
+        pyxel.text(60, 80, "RETRY", 7)
 
 
 App()
