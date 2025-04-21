@@ -14,13 +14,22 @@ class App:
         pyxel.init(160, 160, title="Color Guess Game")
         pyxel.load("assets.pyxres")
         pyxel.mouse(True)
-        # JSONから音楽データ読み込み
+
+        # 音楽データ読み込み
         with open("music.json", "rt") as f:
             self.music = json.load(f)
-        self.mode = "title"  # title, game, result
+
+        self.playing = False  # ← 追加
+        self.play_music_on_startup()  # ← 追加
+
+        self.result_sound_played = False
+        self.play_result_music = False
+        self.result_music_timer = 0
+        self.mode = "title"
         self.reset_game()
 
         pyxel.run(self.update, self.draw)
+
 
     def play_music_on_startup(self):
         for ch, sfx in enumerate(self.music):
@@ -35,6 +44,7 @@ class App:
         self.history = []
         self.cleared = False
         self.is_game_over = False
+        self.result_sound_played = False  # ← これを追加！
 
 
     def update(self):
