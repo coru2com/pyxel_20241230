@@ -17,9 +17,6 @@ class App:
         # JSONから音楽データ読み込み
         with open("music.json", "rt") as f:
             self.music = json.load(f)
-        self.result_sound_played = False  # ← 追加
-        self.play_result_music = False
-        self.result_music_timer = 0
         self.mode = "title"  # title, game, result
         self.reset_game()
 
@@ -38,7 +35,6 @@ class App:
         self.history = []
         self.cleared = False
         self.is_game_over = False
-        self.result_sound_played = False  # ← これを追加！
 
 
     def update(self):
