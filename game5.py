@@ -146,7 +146,7 @@ class App:
         pyxel.text(66, 53, "Reset", 7)
 
         # History (2 columns × 5 rows)
-        pyxel.text(10, 60, "History:", 0)
+        pyxel.text(10, 70, "History:", 0)
         for i, (guess, hit, blow) in enumerate(self.history[-10:]):
             col = i % 2
             row = i // 2
