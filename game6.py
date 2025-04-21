@@ -25,7 +25,7 @@ class App:
         self.result_sound_played = False
         self.play_result_music = False
         self.result_music_timer = 0
-        self.battle_num = 1
+        self.battle_num = 10
         self.mode = "title"
         self.reset_game()
 
