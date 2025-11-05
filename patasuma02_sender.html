@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>デバイス傾きトラッカー</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col items-center p-4">
+
+    <div class="w-full max-w-md bg-white shadow-xl rounded-xl p-6 space-y-6">
+        <h1 class="text-3xl font-extrabold text-gray-800 text-center">デバイス傾き送信アプリ</h1>
+        <p class="text-center text-sm text-gray-500">ニックネームを入力して、センサーを有効にしてください。</p>
+
+        <!-- ニックネーム入力欄 -->
+        <div class="space-y-2">
+            <label for="nickname-input" class="block text-sm font-medium text-gray-700">あなたのニックネーム</label>
+            <input type="text" id="nickname-input" placeholder="例: Yamada's iPhone"
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                   maxlength="20">
+        </div>
+
+        <!-- センサーアクセス許可ボタン -->
+        <div id="permission-container" class="space-y-4">
+            <button id="request-permission" 
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-md disabled:bg-gray-400"
+                    disabled>
+                ステップ 2: センサーを有効にする
+            </button>
+            <p class="text-xs text-red-500 text-center">※ニックネームを入力すると有効になります。</p>
+        </div>
+
+        <!-- ステータス表示 -->
+        <div class="border-t pt-4 space-y-3">
+            <div class="flex justify-between items-center">
+                <span class="text-lg font-semibold text-gray-700">デバイスID:</span>
+                <code id="device-id-display" class="bg-gray-100 p-1 rounded text-xs text-gray-600 truncate">-- 取得中 --</code>
+            </div>
+
+            <div class="flex justify-between items-center p-3 rounded-lg border bg-blue-50">
+                <span class="text-lg font-semibold text-blue-700">現在の向き:</span>
+                <span id="orientation-status" class="text-lg font-bold text-blue-800">未判定</span>
+            </div>
+
+            <div class="flex justify-between items-center text-sm text-gray-500">
+                <span>最終送信時刻:</span>
+                <span id="last-sent-time">--</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // ------------------- 1. Firebase SDK インポート -------------------
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getDatabase, ref, set, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+
+        // ------------------- 2. Firebase 設定 -------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyDQ373qTIdPRKOtlxhF9wyzzNyqWZdXHiM",
+            authDomain: "patasuma01.firebaseapp.com",
+            databaseURL: "https://patasuma01-default-rtdb.firebaseio.com",
+            projectId: "patasuma01",
+            storageBucket: "patasuma01.firebasestorage.app",
+            messagingSenderId: "4535084397",
+            appId: "1:4535084397:web:b80a44af475d2f48e6a664"
+        };
+
+        // Firebase初期化
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // ------------------- 3. UI要素と定数の設定 -------------------
+        const statusElement = document.getElementById('orientation-status');
+        const lastSentTimeElement = document.getElementById('last-sent-time');
+        const deviceIdDisplayElement = document.getElementById('device-id-display');
+        const permissionButton = document.getElementById('request-permission');
+        const permissionContainer = document.getElementById('permission-container');
+        const nicknameInput = document.getElementById('nickname-input');
+        
+        const THRESHOLD_ANGLE = 15;
+        let lastOrientation = 'UNKNOWN';
+
+        // --- デバイスIDとニックネームの初期化/管理 ---
+        let deviceId = localStorage.getItem('deviceId');
+        if (!deviceId) {
+            deviceId = crypto.randomUUID();
+            localStorage.setItem('deviceId', deviceId);
+        }
+        deviceIdDisplayElement.textContent = deviceId;
+        
+        let nickname = localStorage.getItem('nickname') || '';
+        nicknameInput.value = nickname;
+
+        // ニックネームが入力されているかチェックし、センサーボタンを制御
+        const checkNickname = () => {
+            nickname = nicknameInput.value.trim();
+            if (nickname.length > 0) {
+                permissionButton.disabled = false;
+                localStorage.setItem('nickname', nickname);
+            } else {
+                permissionButton.disabled = true;
+            }
+        };
+
+        nicknameInput.addEventListener('input', checkNickname);
+        // ページロード時にもチェック
+        checkNickname();
+
+        // ------------------- 4. データ送信ロジック -------------------
+
+        function sendToFirebase(orientation) {
+            // 送信前に最新のニックネームを取得
+            const currentNickname = nicknameInput.value.trim() || 'Anonymous Device'; 
+
+            if (orientation !== lastOrientation) {
+                lastOrientation = orientation;
+            }
+            
+            const deviceRef = ref(db, 'devices/' + deviceId);
+            
+            set(deviceRef, {
+                nickname: currentNickname, // ニックネームをデータに追加
+                orientation: lastOrientation,
+                lastSeen: serverTimestamp(),
+                currentStatus: statusElement.textContent,
+                deviceId: deviceId // 管理者側で参照しやすいようIDも再度追加
+            })
+            .then(() => {
+                const now = new Date();
+                lastSentTimeElement.textContent = now.toLocaleTimeString();
+                // console.log(`[Firebase] Data sent successfully: ${lastOrientation} by ${currentNickname}`);
+            })
+            .catch((error) => {
+                console.error("[Firebase] Error sending data:", error);
+                statusElement.textContent = `DBエラー: ${lastOrientation} (コンソールを確認)`;
+            });
+        }
+        
+        // 5秒ごとに強制的にデータを送信
+        setInterval(() => {
+            if (lastOrientation !== 'UNKNOWN') {
+                sendToFirebase(lastOrientation);
+            }
+        }, 5000);
+
+        // ------------------- 5. 傾き検出ロジック (変更なし) -------------------
+
+        function checkOrientation(beta, gamma) {
+            let orientation = 'UNKNOWN';
+            let statusText = '判定中...';
+            
+            // beta: X軸周りの回転 (横倒し、奥手前)
+            // gamma: Y軸周りの回転 (縦倒し、左右)
+
+            // デバイスが上を向いている (ほぼ水平)
+            if (Math.abs(beta) < THRESHOLD_ANGLE && Math.abs(gamma) < THRESHOLD_ANGLE) {
+                orientation = 'UP';
+                statusText = '✅ 画面は上向きです (Face Up)';
+            } 
+            // デバイスが下を向いている (ほぼ逆さま)
+            // betaは-90から90度で変動するが、スマホを逆さにするとβが180度近く、または-180度近くになることがある。
+            // 180度を基準に判定する
+            else if (Math.abs(beta) > (180 - THRESHOLD_ANGLE) && Math.abs(beta) < (180 + THRESHOLD_ANGLE)) {
+                orientation = 'DOWN';
+                statusText = '🛑 画面は下向きです (Face Down)';
+            }
+            else {
+                orientation = 'SIDE';
+                statusText = `▶️ 横向き/縦向き (β:${beta.toFixed(1)}, γ:${gamma.toFixed(1)})`;
+            }
+
+            statusElement.textContent = statusText;
+
+            // 向きが変わった場合、または強制送信時間でなければ
+            if (orientation !== lastOrientation) {
+                 sendToFirebase(orientation);
+            }
+            lastOrientation = orientation;
+        }
+
+
+        // ------------------- 6. センサーイベント初期化と許可要求 -------------------
+
+        function initOrientationListener() {
+            if ('DeviceOrientationEvent' in window) {
+                window.addEventListener('deviceorientation', function(event) {
+                    if (event.beta !== null && event.gamma !== null) {
+                        checkOrientation(event.beta, event.gamma);
+                    }
+                });
+                // 画面表示を更新して、センサーが有効になったことを示す
+                statusElement.textContent = 'センサー有効化、データを送信中...';
+            } else {
+                statusElement.textContent = 'エラー: ブラウザがDeviceOrientationEventをサポートしていません';
+            }
+            permissionContainer.style.display = 'none'; // 許可後にボタンを非表示
+            nicknameInput.disabled = true; // センサー開始後はニックネームを固定
+        }
+
+        permissionButton.addEventListener('click', () => {
+             // クリック時にニックネームを確定
+            nickname = nicknameInput.value.trim();
+            localStorage.setItem('nickname', nickname);
+
+            // iOS 13+ の Safari で必要なアクセス許可を要求
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            initOrientationListener();
+                        } else {
+                            statusElement.textContent = 'センサーアクセスが拒否されました。';
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // その他のブラウザでは直接開始
+                initOrientationListener();
+            }
+        });
+
+        // 許可要求が不要な環境で、かつニックネームが入力されていれば即座に開始
+        if (typeof DeviceOrientationEvent.requestPermission !== 'function' && nicknameInput.value.trim().length > 0) {
+            initOrientationListener();
+        }
+
+    </script>
+</body>
+</html>
