@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>デバイス傾きトラッカー</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col items-center p-4">
+
+    <div class="w-full max-w-md bg-white shadow-xl rounded-xl p-6 space-y-6">
+        <h1 class="text-3xl font-extrabold text-gray-800 text-center">デバイス傾き送信アプリ</h1>
+        <p class="text-center text-sm text-gray-500">このページを開いたデバイスの向きをFirebaseに送信しています。</p>
+
+        <!-- センサーアクセス許可ボタン -->
+        <div id="permission-container" class="space-y-4">
+            <button id="request-permission" 
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-150 shadow-md">
+                ステップ 1: センサーを有効にする (iOS Safari向け)
+            </button>
+            <p class="text-xs text-red-500 text-center">※AndroidやChromeではボタンを押さずに動作する場合もあります。</p>
+        </div>
+
+        <!-- ステータス表示 -->
+        <div class="border-t pt-4 space-y-3">
+            <div class="flex justify-between items-center">
+                <span class="text-lg font-semibold text-gray-700">デバイスID:</span>
+                <code id="device-id-display" class="bg-gray-100 p-1 rounded text-sm text-gray-600 truncate">-- 取得中 --</code>
+            </div>
+
+            <div class="flex justify-between items-center p-3 rounded-lg border bg-blue-50">
+                <span class="text-lg font-semibold text-blue-700">現在の向き:</span>
+                <span id="orientation-status" class="text-lg font-bold text-blue-800">未判定</span>
+            </div>
+
+            <div class="flex justify-between items-center text-sm text-gray-500">
+                <span>最終送信時刻:</span>
+                <span id="last-sent-time">--</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // ------------------- 1. Firebase SDK インポート -------------------
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getDatabase, ref, set, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+
+        // ------------------- 2. Firebase 設定 (ユーザー提供情報) -------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyDQ373qTIdPRKOtlxhF9wyzzNyqWZdXHiM",
+            authDomain: "patasuma01.firebaseapp.com",
+            databaseURL: "https://patasuma01-default-rtdb.firebaseio.com",
+            projectId: "patasuma01",
+            storageBucket: "patasuma01.firebasestorage.app",
+            messagingSenderId: "4535084397",
+            appId: "1:4535084397:web:b80a44af475d2f48e6a664"
+        };
+
+        // Firebase初期化
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // ------------------- 3. UI要素と定数の設定 -------------------
+        const statusElement = document.getElementById('orientation-status');
+        const lastSentTimeElement = document.getElementById('last-sent-time');
+        const deviceIdDisplayElement = document.getElementById('device-id-display');
+        const permissionButton = document.getElementById('request-permission');
+        const permissionContainer = document.getElementById('permission-container');
+
+        // デバイス識別のためのユニークIDを生成（初回のみ）
+        let deviceId = localStorage.getItem('deviceId');
+        if (!deviceId) {
+            deviceId = crypto.randomUUID();
+            localStorage.setItem('deviceId', deviceId);
+        }
+        deviceIdDisplayElement.textContent = deviceId;
+
+        // 判定に使用する許容誤差（しきい値）
+        const THRESHOLD_ANGLE = 15; // 15度以内を許容範囲とする
+        let lastOrientation = 'UNKNOWN';
+
+        // ------------------- 4. データ送信ロジック -------------------
+
+        /**
+         * リアルタイムデータベースに現在の状態を送信する
+         * 送信はデバイスIDをキーとする
+         * @param {string} orientation - 'UP' or 'DOWN'
+         */
+        function sendToFirebase(orientation) {
+            if (orientation !== lastOrientation) {
+                lastOrientation = orientation; // 状態が変化した場合のみ更新
+            }
+            
+            const deviceRef = ref(db, 'devices/' + deviceId);
+            
+            set(deviceRef, {
+                orientation: lastOrientation,
+                lastSeen: serverTimestamp(),
+                // 画面向きがUP/DOWNを判定しやすいように角度も送っておく
+                currentStatus: statusElement.textContent 
+            })
+            .then(() => {
+                const now = new Date();
+                lastSentTimeElement.textContent = now.toLocaleTimeString();
+                console.log(`[Firebase] Data sent successfully: ${lastOrientation}`);
+            })
+            .catch((error) => {
+                // 通常、セキュリティルール違反で発生しやすい
+                console.error("[Firebase] Error sending data:", error);
+                statusElement.textContent = `DBエラー: ${lastOrientation} (コンソールを確認)`;
+            });
+        }
+        
+        // 5秒ごとに強制的にデータを送信
+        setInterval(() => {
+            // lastOrientationに前回の値が入っているはず
+            if (lastOrientation !== 'UNKNOWN') {
+                sendToFirebase(lastOrientation);
+            }
+        }, 5000); // 5秒間隔
+
+        // ------------------- 5. 傾き検出ロジック -------------------
+
+        /**
+         * 画面の向きを判定するロジック
+         * @param {number} beta - ピッチ（X軸周り: 前後の傾き, -180 to 180）
+         * @param {number} gamma - ロール（Y軸周り: 左右の傾き, -90 to 90）
+         */
+        function checkOrientation(beta, gamma) {
+            let orientation = 'UNKNOWN';
+            let statusText = '判定中...';
+
+            // 1. 画面が上向き (Face Up) の判定
+            // 傾きが少ない状態 (0度付近)
+            if (
+                Math.abs(beta) < THRESHOLD_ANGLE &&
+                Math.abs(gamma) < THRESHOLD_ANGLE
+            ) {
+                orientation = 'UP';
+                statusText = '✅ 画面は上向きです';
+            }
+            
+            // 2. 画面が下向き (Face Down) の判定
+            // betaが180度付近（裏返し）の状態
+            // Math.abs(beta)が 180 - THRESHOLD_ANGLE (165度) より大きい
+            else if (
+                Math.abs(beta) > (180 - THRESHOLD_ANGLE) 
+            ) {
+                orientation = 'DOWN';
+                statusText = '🛑 画面は下向きです';
+            } else {
+                // 中間的な状態（縦置き、横置きなど）
+                orientation = 'SIDE';
+                statusText = `▶️ 横向き/縦向き (β:${beta.toFixed(1)}, γ:${gamma.toFixed(1)})`;
+            }
+
+            statusElement.textContent = statusText;
+
+            // 向きがUPまたはDOWNに変わった場合、即座にFirebaseに送信
+            if (orientation === 'UP' || orientation === 'DOWN') {
+                if (orientation !== lastOrientation) {
+                     sendToFirebase(orientation);
+                }
+            }
+            lastOrientation = orientation;
+        }
+
+
+        // ------------------- 6. センサーイベント初期化と許可要求 -------------------
+
+        function initOrientationListener() {
+            if ('DeviceOrientationEvent' in window) {
+                window.addEventListener('deviceorientation', function(event) {
+                    // 角度がnullでないことを確認
+                    if (event.beta !== null && event.gamma !== null) {
+                        checkOrientation(event.beta, event.gamma);
+                    }
+                });
+                console.log("[Sensor] DeviceOrientation listener active.");
+            } else {
+                statusElement.textContent = 'エラー: ブラウザ非対応';
+            }
+            permissionContainer.style.display = 'none'; // 許可後にボタンを非表示
+        }
+
+        // iOS 13以降のSafariで許可を要求する関数
+        permissionButton.addEventListener('click', () => {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            initOrientationListener();
+                        } else {
+                            statusElement.textContent = 'センサーアクセスが拒否されました。';
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // iOS Safari以外 or 古いiOSの場合、そのままイベントリスナーを登録
+                initOrientationListener();
+            }
+        });
+
+        // 初期状態のチェック（許可要求が不要な環境では即座に開始）
+        if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+            initOrientationListener();
+        }
+
+    </script>
+</body>
+</html>
