@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase お絵かきチャット</title>
+<style>
+/* CSSは変更なし */
+body {
+    text-align: center;
+    font-family: sans-serif;
+    margin: 20px;
+}
+#drawingCanvas {
+    border: 1px solid #ccc;
+    cursor: crosshair;
+    /* スマホでも見やすいサイズに設定 */
+    width: 90%;
+    height: 400px;
+}
+#clearButton {
+    margin-top: 20px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: #f44336; /* 赤色 */
+    color: white;
+    border: none;
+    border-radius: 5px;
+}
+</style>
+</head>
+<body>
+    <h1>シンプルお絵かきチャット</h1>
+    <canvas id="drawingCanvas"></canvas>
+    <button id="clearButton">全削除</button>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+    <script>
+        // V8方式の初期化設定をグローバル変数として定義
+        const firebaseConfig = {
+            apiKey: "AIzaSyAuV1fygvQIHKrLoO378CHorZHLPNsjwV4",
+            authDomain: "oekakipj2.firebaseapp.com",
+            databaseURL: "https://oekakipj2-default-rtdb.firebaseio.com",
+            projectId: "oekakipj2",
+            storageBucket: "oekakipj2.firebasestorage.app",
+            messagingSenderId: "25426281057",
+            appId: "1:25426281057:web:c4e727d4e68a028e75a020"
+        };
+
+        // V8方式でFirebaseを初期化
+        firebase.initializeApp(firebaseConfig);
+
+        // Realtime Databaseへの参照（データの保存場所）
+        // グローバル変数 firebase を使って処理を続ける
+        const database = firebase.database();
+        const canvasRef = database.ref('drawings');
+        // ... (以下、ロジック部分は変更なしでOK)
+
+        // Canvasの準備
+        const canvas = document.getElementById('drawingCanvas');
+        // 実際の描画サイズを設定（高解像度対応のためCSSとは別に設定）
+        canvas.width = 800;
+        canvas.height = 400;
+        const ctx = canvas.getContext('2d');
+
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        // 描画設定（単色・シンプル）
+        ctx.strokeStyle = '#000000'; // 黒
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 5;
+
+        // ===================================================
+        // 1. ユーザー操作時の処理 (描画とFirebaseへの書き込み)
+        // ===================================================
+
+        function draw(e) {
+            if (!isDrawing) return;
+
+            // 現在の座標を取得 (スマホ対応のためe.touchesも考慮)
+            const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : undefined);
+            const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : undefined);
+
+            if (clientX === undefined) return;
+
+            // Canvas上の相対座標に変換
+            const rect = canvas.getBoundingClientRect();
+            const currentX = (clientX - rect.left) * (canvas.width / rect.width);
+            const currentY = (clientY - rect.top) * (canvas.height / rect.height);
+
+            // 描画に必要なデータをFirebaseにプッシュ（書き込み）
+            canvasRef.push({
+                x1: lastX,
+                y1: lastY,
+                x2: currentX,
+                y2: currentY,
+                color: ctx.strokeStyle
+            });
+
+            // 次の描画のために座標を更新
+            lastX = currentX;
+            lastY = currentY;
+        }
+
+        function startDrawing(e) {
+            isDrawing = true;
+            // 開始座標を設定
+            const clientX = e.clientX || (e.touches && e.touches[0] ? e.touches[0].clientX : undefined);
+            const clientY = e.clientY || (e.touches && e.touches[0] ? e.touches[0].clientY : undefined);
+
+            if (clientX === undefined) return;
+
+            const rect = canvas.getBoundingClientRect();
+            lastX = (clientX - rect.left) * (canvas.width / rect.width);
+            lastY = (clientY - rect.top) * (canvas.height / rect.height);
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        // マウスイベント
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+
+        // タッチイベント (スマホ対応)
+        canvas.addEventListener('touchstart', startDrawing);
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault(); // スクロール防止
+            draw(e);
+        }, { passive: false });
+        canvas.addEventListener('touchend', stopDrawing);
+
+
+        // ===================================================
+        // 2. Firebaseのデータ更新を監視する処理 (同期)
+        // ===================================================
+
+        canvasRef.on('child_added', snapshot => {
+            // Firebaseに新しい線データが追加されたら実行
+            const data = snapshot.val();
+
+            // データを使ってCanvasに描画
+            ctx.beginPath();
+            ctx.strokeStyle = data.color;
+            ctx.moveTo(data.x1, data.y1);
+            ctx.lineTo(data.x2, data.y2);
+            ctx.stroke();
+        });
+// ===================================================
+// 3. 全削除機能
+// ===================================================
+
+const clearButton = document.getElementById('clearButton');
+
+clearButton.addEventListener('click', () => {
+    // 1. Firebaseのデータを削除
+    // 'drawings'ノード以下にある全てのデータを削除します
+    canvasRef.remove()
+        .then(() => {
+            console.log("Firebaseデータ削除成功");
+        })
+        .catch((error) => {
+            console.error("Firebaseデータ削除エラー:", error);
+            alert("削除に失敗しました。Firebaseのルールを確認してください。");
+        });
+
+    // 2. ローカルのCanvasをクリア
+    // 他のユーザーの画面はFirebaseのデータが消えると
+    // 描画を監視するイベント（canvasRef.on()）が発動してクリアされますが、
+    // 自分の画面も即座にクリアします。
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+});
+    </script>
+</body>
+</html>
