@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理者ダッシュボード | デバイス傾き監視</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome (アイコン用) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        /* デバイスが「DOWN」の時に行をハイライトするためのスタイル */
+        .status-down {
+            background-color: #fff1f2 !important; /* Tailwindの bg-red-50 */
+            border-left: 4px solid #f87171; /* Tailwindの border-red-400 */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+
+    <div class="max-w-6xl mx-auto bg-white shadow-2xl rounded-2xl overflow-hidden">
+        <!-- ヘッダー -->
+        <div class="bg-gradient-to-r from-gray-800 to-gray-700 p-6 flex justify-between items-center">
+            <h1 class="text-3xl font-bold text-white tracking-wider">
+                <i class="fas fa-desktop mr-3"></i>管理者ダッシュボード
+            </h1>
+            <div class="flex items-center space-x-3">
+                <span class="text-sm font-medium text-green-300">接続ステータス:</span>
+                <span id="connection-status" class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500" title="接続待機中..."></span>
+                </span>
+            </div>
+        </div>
+
+        <!-- デバイス一覧テーブル -->
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                            <i class="fas fa-mobile-alt mr-2"></i>デバイスID
+                        </th>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                            <i class="fas fa-compass mr-2"></i>現在の向き
+                        </th>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                            <i class="fas fa-info-circle mr-2"></i>詳細ステータス
+                        </th>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">
+                            <i class="fas fa-clock mr-2"></i>最終更新
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="devices-table-body" class="bg-white divide-y divide-gray-200">
+                    <!-- データはここに動的に挿入されます -->
+                    <tr id="loading-row">
+                        <td colspan="4" class="px-6 py-12 text-center text-gray-500 text-lg animate-pulse">
+                            <i class="fas fa-sync fa-spin mr-3"></i>Firebaseからのデータを待機中...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        // ------------------- 1. Firebase SDK インポート -------------------
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        // Realtime Databaseのリアルタイム監視機能（onValue）を使います
+        import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+
+        // ------------------- 2. Firebase 設定 (送信側と全く同じ) -------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyDQ373qTIdPRKOtlxhF9wyzzNyqWZdXHiM",
+            authDomain: "patasuma01.firebaseapp.com",
+            databaseURL: "https://patasuma01-default-rtdb.firebaseio.com",
+            projectId: "patasuma01",
+            storageBucket: "patasuma01.firebasestorage.app",
+            messagingSenderId: "4535084397",
+            appId: "1:4535084397:web:b80a44af475d2f48e6a664"
+        };
+
+        // Firebase初期化
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        
+        // ------------------- 3. UI要素の取得 -------------------
+        const tableBody = document.getElementById('devices-table-body');
+        const loadingRow = document.getElementById('loading-row');
+        const connectionStatusDot = document.getElementById('connection-status');
+
+        // ------------------- 4. リアルタイム監視 (onValue) -------------------
+        
+        // /devices パス全体を監視
+        const devicesRef = ref(db, 'devices/');
+        
+        console.log("[RTDB] /devices パスの監視を開始します...");
+
+        onValue(devicesRef, (snapshot) => {
+            console.log("[RTDB] データを受信しました！", snapshot.val());
+
+            // 接続ステータスを「接続済み」に変更
+            connectionStatusDot.innerHTML = `
+                <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500" title="接続済み"></span>
+            `;
+
+            const devicesData = snapshot.val();
+            
+            // テーブルをクリア
+            tableBody.innerHTML = ''; 
+
+            if (!devicesData || Object.keys(devicesData).length === 0) {
+                // データがない場合
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="px-6 py-12 text-center text-gray-500 text-lg">
+                            <i class="fas fa-exclamation-triangle mr-3 text-yellow-500"></i>現在アクティブなデバイスはありません。
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            // データをテーブルの行に変換
+            // Object.entriesで { deviceId: { orientation, ... } } を [deviceId, { orientation, ... }] の配列に変換
+            Object.entries(devicesData).forEach(([deviceId, data]) => {
+                const orientation = data.orientation || 'N/A';
+                const statusText = data.currentStatus || 'N/A';
+                
+                // サーバータイムスタンプ(数値)をDateオブジェクトに変換
+                const lastSeenDate = new Date(data.lastSeen || Date.now());
+                const lastSeenFormatted = lastSeenDate.toLocaleString('ja-JP');
+
+                // 向きに応じたスタイルを設定
+                let orientationIcon = '<i class="fas fa-question text-gray-400"></i>';
+                let orientationClass = '';
+                
+                if (orientation === 'UP') {
+                    orientationIcon = '<i class="fas fa-arrow-up text-green-500"></i>';
+                } else if (orientation === 'DOWN') {
+                    orientationIcon = '<i class="fas fa-arrow-down text-red-500"></i>';
+                    orientationClass = 'status-down'; // 赤くハイライトするクラス
+                } else if (orientation === 'SIDE') {
+                    orientationIcon = '<i class="fas fa-arrows-alt-h text-blue-500"></i>';
+                }
+
+                // 新しい行(TR)を作成
+                const row = document.createElement('tr');
+                row.className = `transition-all duration-300 ease-in-out ${orientationClass}`;
+                
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="text-sm font-medium text-gray-900">${deviceId}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="text-lg font-bold ${orientation === 'DOWN' ? 'text-red-600' : 'text-gray-800'}">
+                            ${orientationIcon}
+                            <span class="ml-2">${orientation}</span>
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="text-sm text-gray-600">${statusText}</span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="text-sm text-gray-500">${lastSeenFormatted}</span>
+                    </td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+
+        }, (error) => {
+            // 監視エラー（通常はセキュリティルール違反）
+            console.error("[RTDB] 監視エラー:", error);
+            loadingRow.innerHTML = `<td colspan="4" class="px-6 py-12 text-center text-red-500 text-lg">
+                                        <i class="fas fa-times-circle mr-3"></i>DB読み取りエラー (セキュリティルールを確認してください)
+                                    </td>`;
+            connectionStatusDot.innerHTML = `
+                <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500" title="エラー"></span>
+            `;
+        });
+
+    </script>
+</body>
+</html>
