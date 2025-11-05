@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>スマホ傾きチェック</title>
+</head>
+<body>
+    <h1>デバイスの向き</h1>
+    <p id="orientation-status">センサーを有効にしてください...</p>
+    <button id="request-permission">センサーを有効にする (iOS Safari向け)</button>
+
+<script>
+const statusElement = document.getElementById('orientation-status');
+const permissionButton = document.getElementById('request-permission');
+
+// 判定に使用する許容誤差（しきい値）
+const THRESHOLD_ANGLE = 15; // 15度以内を許容範囲とする
+
+/**
+ * 画面の向きを判定するロジック
+ * @param {number} beta - ピッチ（X軸周り: 前後の傾き）
+ * @param {number} gamma - ロール（Y軸周り: 左右の傾き）
+ */
+function checkOrientation(beta, gamma) {
+    let orientation = '不明';
+
+    // 1. 画面が上向き (Face Up) の判定
+    // ほとんど傾きがない状態（beta, gammaが0度付近）
+    if (
+        Math.abs(beta) < THRESHOLD_ANGLE &&
+        Math.abs(gamma) < THRESHOLD_ANGLE
+    ) {
+        orientation = '✅ 画面は上向きです (Face Up)';
+    }
+
+    // 2. 画面が下向き (Face Down) の判定
+    // betaが180度付近（裏返し）の状態
+    // betaは -180 から 180 の範囲
+    else if (
+        Math.abs(beta) > (180 - THRESHOLD_ANGLE) // 165度～180度
+    ) {
+        // gammaは無視して、裏返しに近い状態を検出
+        orientation = '🛑 画面は下向きです (Face Down)';
+    }
+
+    statusElement.textContent = orientation;
+    // 将来的にFirebaseに送信するロジックをここに組み込みます
+    // sendToFirebase(orientation);
+}
+
+
+// --- センサーイベントの登録と許可要求 ---
+
+function initOrientationListener() {
+    if ('DeviceOrientationEvent' in window) {
+        window.addEventListener('deviceorientation', function(event) {
+            // event.beta (ピッチ) と event.gamma (ロール) を使用
+            const beta = event.beta;
+            const gamma = event.gamma;
+
+            // 角度がnullでないことを確認
+            if (beta !== null && gamma !== null) {
+                checkOrientation(beta, gamma);
+            }
+        });
+        statusElement.textContent = 'センサーデータ受信待ち...';
+    } else {
+        statusElement.textContent = 'エラー: お使いのブラウザはDeviceOrientationEventをサポートしていません。';
+    }
+    permissionButton.style.display = 'none'; // 許可後にボタンを非表示
+}
+
+// iOS 13以降のSafariで許可を要求する関数
+permissionButton.addEventListener('click', () => {
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+            .then(permissionState => {
+                if (permissionState === 'granted') {
+                    initOrientationListener();
+                } else {
+                    statusElement.textContent = 'センサーアクセスが拒否されました。';
+                }
+            })
+            .catch(console.error);
+    } else {
+        // iOS Safari以外 or 古いiOSの場合、そのままイベントリスナーを登録
+        initOrientationListener();
+    }
+});
+
+// 初期状態のチェック
+// 許可要求関数がある場合は、ボタンが表示され、ユーザーの操作を待つ
+if (typeof DeviceOrientationEvent.requestPermission !== 'function') {
+    initOrientationListener();
+}
+</script>
+</body>
+</html>
